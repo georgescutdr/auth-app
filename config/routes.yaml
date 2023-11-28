@@ -1,0 +1,29 @@
+controllers:
+    resource:
+        path: ../src/Controller/
+        namespace: App\Controller
+    type: annotation
+
+home:
+    path: /
+    controller: App\Controller\RegistrationController::home
+
+services:
+    path: /services
+    controller: App\Controller\RegistrationController::services
+
+contact:
+    path: /contact
+    controller: App\Controller\RegistrationController::contact
+
+register:
+    path: /register
+    controller: App\Controller\RegistrationController::register
+
+login:
+    path: /login
+    controller: App\Controller\RegistrationController::login
+
+logout:
+    path: /logout
+    controller: App\Controller\RegistrationController::logout

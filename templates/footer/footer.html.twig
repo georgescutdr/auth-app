@@ -1,0 +1,15 @@
+</body>
+</html>
+
+<script>
+    $( document ).ready(function() {
+        $('#delete-image').click(function(e){
+            e.stopPropagation();
+            e.preventDefault();
+            if(confirm('Are you sure you want to delete this image?')) {
+                window.location = window.location + '?delete-image=yes';
+            }
+        });
+
+    });
+</script>

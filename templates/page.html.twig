@@ -1,0 +1,28 @@
+{% include '/header/menu.html.twig' %}
+
+<div class="content">
+    <div class="title">{{ title|upper }}</div>
+
+    {% if image is not null %}
+        <img src="{{ asset('uploads/images/' ~ image) }}" alt="image" class="img"/>
+    {% endif %}
+    {% if app.user is not null and app.user.getRole() == 0 and image is not null%}
+        <br/><a href="" id="delete-image">Delete image</a>
+    {% endif %}
+
+
+    {% if app.user is not null and app.user.getRole() == 0 %}
+        {{ form_start(form) }}
+        {{ form_row(form.title) }}
+        {{ form_row(form.image) }}
+        <div class="text-editor">{{ form_row(form.text) }}</div>
+        {{ form_end(form) }}
+        <div class="page-message">{{ message }}</div>
+    {% else %}
+        <div class="text">{{ text | raw }}</div>
+    {% endif %}
+
+</div>
+
+
+{% include '/footer/footer.html.twig' %}

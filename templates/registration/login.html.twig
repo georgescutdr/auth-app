@@ -1,0 +1,13 @@
+{% include '/header/menu.html.twig' %}
+
+<div class="content">
+    <div class="title">Login</div>
+{{ form_start(form) }}
+    {{ form_row(form.email) }}
+    {{ form_row(form.password) }}
+{{ form_end(form) }}
+
+<div class="error">{{ error }}</div>
+</div>
+
+{% include '/footer/footer.html.twig' %}

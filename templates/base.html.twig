@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="UTF-8">
+        <title>{% block title %}Welcome!{% endblock %}</title>
+        <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 128 128%22><text y=%221.2em%22 font-size=%2296%22>⚫️</text></svg>">
+        {% block stylesheets %}
+        {% endblock %}
+
+        {% block javascripts %}
+        {% endblock %}
+    </head>
+    <body>
+        {% block body %}{% endblock %}
+    </body>
+</html>
+
+
+<?php
+
+namespace App\Controller;
+
+use App\Entity\Page;
+use App\Form\LoginType;
+use App\Form\PageType;
+use App\Form\UserType;
+use App\Entity\User;
+use App\Repository\UserRepository;
+use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\Persistence\ManagerRegistry;
+use Symfony\Bundle\FrameworkBundle\Controller\Controller;
+use Symfony\Bundle\SecurityBundle\Security;
+use Symfony\Component\HttpFoundation\File\Exception\FileException;
+use Symfony\Component\HttpFoundation\File\UploadedFile;
+use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\Routing\Annotation\Route;
+use Symfony\Component\Security\Core\Encoder\UserPasswordEncoderInterface;
+use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\String\Slugger\SluggerInterface;
+
+class RegistrationController extends AbstractController
+{
+    /**
+     * @Route("/register", name="register")
+     */
+    public function register(Request $request, ManagerRegistry $doctrine, Security $security)
+    {
+        $em = $doctrine->getManager();
+
+$form = $this->createForm(UserType::class);
+
+$form->handleRequest($request);
+if ($form->isSubmitted() && $form->isValid()) {
+$form_data = $form->getData();
+$email = $form_data['email'];
+
+//check if user already exists
+$repository = $em->getRepository(User::class);
+$user = $repository->findOneBy(['email' => $email]);
+
+if($user) {
+$error = 'User ' . $email . ' already exists!';
+
+return $this->render(
+'registration/register.html.twig',
+[
+'form'  => $form->createView(),
+'error' => $error
+]
+);
+} else {
+$user = new User();
+}
+
+$password = md5($form_data['password']);
+
+$user->setEmail($email);
+$user->setPassword($password);
+$user->setRole(User::roles['user']);
+
+$em->persist($user);
+$em->flush();
+
+$security->login($user);
+
+return $this->render(
+'registration/success.html.twig', ['email' => $email]
+);
+}
+
+return $this->render(
+'registration/register.html.twig',
+['form' => $form->createView()]
+);
+}
+
+/**
+* @Route("/login", name="login")
+*/
+public function login(Request $request, ManagerRegistry $doctrine, Security $security)
+{
+$em = $doctrine->getManager();
+
+$form = $this->createForm(LoginType::class);
+
+$error = '';
+
+$form->handleRequest($request);
+if ($form->isSubmitted() && $form->isValid()) {
+$form_data = $form->getData();
+
+$password = md5($form_data['password']);
+
+$repository = $em->getRepository(User::class);
+$user = $repository->findOneBy(['email' => $form_data['email'], 'password' => $password]);
+
+if($user) {
+//success
+$security->login($user);
+
+return $this->redirectToRoute('index');
+}
+
+$error = 'Invalid credentials!';
+}
+
+return $this->render(
+'registration/login.html.twig',
+['form' => $form->createView(), 'error' => $error]
+);
+}
+
+/**
+* @Route("/", name="index")
+*/
+public function home(Request $request, Security $security, ManagerRegistry $doctrine, SluggerInterface $slugger)
+{
+$em = $doctrine->getManager();
+
+$repository = $em->getRepository(Page::class);
+$page = $repository->findOneBy(['type' => Page::types['home']]);
+
+//delete image
+if($page && $request->query->get('delete-image')) {
+@unlink($this->getParameter('images_directory') . '/' . $page->getImage());
+$page->setImage(null);
+$em->persist($page);
+$em->flush();
+
+return $this->redirectToRoute('index');
+}
+
+$loggedUser = $security->getUser();
+$form = null;
+$message = null;
+
+if($loggedUser && $loggedUser->getRole() == User::roles['admin']) {
+$form = $this->createForm(PageType::class, $page);
+$form->handleRequest($request);
+
+if ($form->isSubmitted() && $form->isValid()) {
+$form_data = $form->getData();
+
+if(!$page) {
+$page = new Page();
+}
+
+/** @var UploadedFile $imageFile */
+$imageFile = $form->get('image')->getData();
+
+if ($imageFile) {
+//delete the old file if exists
+$oldFile = $page->getImage();
+if($oldFile) {
+@unlink($this->getParameter('images_directory') . '/' . $oldFile);
+}
+
+$originalFilename = pathinfo($imageFile->getClientOriginalName(), PATHINFO_FILENAME);
+$safeFilename = $slugger->slug($originalFilename);
+$newFilename = $safeFilename.'-'.uniqid().'.'.$imageFile->guessExtension();
+
+// Move the file to the uploads/images directory
+try {
+$imageFile->move(
+$this->getParameter('images_directory'),
+$newFilename
+);
+} catch (FileException $e) {
+
+}
+
+$page->setImage($newFilename);
+}
+
+$page->setTitle($form_data->getTitle());
+$page->setText($form_data->getText());
+
+$em->persist($page);
+$em->flush();
+
+$message = 'Page saved!';
+}
+}
+
+return $this->render('page.html.twig', [
+'title'     => $page ? $page->getTitle() : null,
+'image'     => $page ? $page->getImage() : null,
+'text'      => $page ? $page->getText() : null,
+'form'      => $form,
+'message'   => $message,
+'questions' => $this->showQuestions()
+]);
+}
+
+/**
+* @Route("/services", name="services")
+*/
+public function services(Request $request, Security $security, ManagerRegistry $doctrine, SluggerInterface $slugger)
+{
+$em = $doctrine->getManager();
+
+$repository = $em->getRepository(Page::class);
+$page = $repository->findOneBy(['type' => Page::types['services']]);
+
+//delete image
+if($page && $request->query->get('delete-image')) {
+@unlink($this->getParameter('images_directory') . '/' . $page->getImage());
+$page->setImage(null);
+$em->persist($page);
+$em->flush();
+
+return $this->redirectToRoute('services');
+}
+
+$loggedUser = $security->getUser();
+$form = null;
+$message = null;
+
+if($loggedUser && $loggedUser->getRole() == User::roles['admin']) {
+$form = $this->createForm(PageType::class, $page);
+$form->handleRequest($request);
+
+if ($form->isSubmitted() && $form->isValid()) {
+$form_data = $form->getData();
+
+if(!$page) {
+$page = new Page();
+}
+
+/** @var UploadedFile $imageFile */
+$imageFile = $form->get('image')->getData();
+
+if ($imageFile) {
+//delete the old file if exists
+$oldFile = $page->getImage();
+if($oldFile) {
+@unlink($this->getParameter('images_directory') . '/' . $oldFile);
+}
+
+$originalFilename = pathinfo($imageFile->getClientOriginalName(), PATHINFO_FILENAME);
+// this is needed to safely include the file name as part of the URL
+$safeFilename = $slugger->slug($originalFilename);
+$newFilename = $safeFilename.'-'.uniqid().'.'.$imageFile->guessExtension();
+
+// Move the file to the uploads/images directory
+try {
+$imageFile->move(
+$this->getParameter('images_directory'),
+$newFilename
+);
+} catch (FileException $e) {
+
+}
+
+$page->setImage($newFilename);
+}
+
+$page->setTitle($form_data->getTitle());
+$page->setText($form_data->getText());
+
+$em->persist($page);
+$em->flush();
+
+$message = 'Page saved!';
+}
+}
+
+return $this->render('page.html.twig', [
+'title' => $page ? $page->getTitle() : null,
+'image' => $page ? $page->getImage() : null,
+'text'  => $page ? $page->getText() : null,
+'form'  => $form,
+'message' => $message
+]);
+}
+
+/**
+* @Route("/contact", name="contact")
+*/
+public function contact(Request $request, Security $security, ManagerRegistry $doctrine, SluggerInterface $slugger)
+{
+$em = $doctrine->getManager();
+
+$repository = $em->getRepository(Page::class);
+$page = $repository->findOneBy(['type' => Page::types['contact']]);
+
+//delete image
+if($page && $request->query->get('delete-image')) {
+@unlink($this->getParameter('images_directory') . '/' . $page->getImage());
+$page->setImage(null);
+$em->persist($page);
+$em->flush();
+
+return $this->redirectToRoute('contact');
+}
+
+$loggedUser = $security->getUser();
+$form = null;
+$message = null;
+
+if($loggedUser && $loggedUser->getRole() == User::roles['admin']) {
+$form = $this->createForm(PageType::class, $page);
+$form->handleRequest($request);
+
+if ($form->isSubmitted() && $form->isValid()) {
+$form_data = $form->getData();
+
+if(!$page) {
+$page = new Page();
+}
+
+/** @var UploadedFile $imageFile */
+$imageFile = $form->get('image')->getData();
+
+if ($imageFile) {
+//delete the old file if exists
+$oldFile = $page->getImage();
+if($oldFile) {
+@unlink($this->getParameter('images_directory') . '/' . $oldFile);
+}
+
+$originalFilename = pathinfo($imageFile->getClientOriginalName(), PATHINFO_FILENAME);
+// this is needed to safely include the file name as part of the URL
+$safeFilename = $slugger->slug($originalFilename);
+$newFilename = $safeFilename.'-'.uniqid().'.'.$imageFile->guessExtension();
+
+// Move the file to the uploads/images directory
+try {
+$imageFile->move(
+$this->getParameter('images_directory'),
+$newFilename
+);
+} catch (FileException $e) {
+
+}
+
+$page->setImage($newFilename);
+}
+
+$page->setTitle($form_data->getTitle());
+$page->setText($form_data->getText());
+
+$em->persist($page);
+$em->flush();
+
+$message = 'Page saved!';
+}
+}
+
+return $this->render('page.html.twig', [
+'title' => $page ? $page->getTitle() : null,
+'image' => $page ? $page->getImage() : null,
+'text'  => $page ? $page->getText() : null,
+'form'  => $form,
+'message' => $message
+]);
+}
+
+/**
+* @Route("/logout", name="logout")
+*/
+public function logout(Security $security)
+{
+$security->logout(false);
+
+return $this->redirectToRoute('index');
+}
+
+private function showQuestions() {
+//1. Enumerate all odd numbers between 100 and 744
+$oddNumbers = $this->oddNumbers(100, 744);
+
+//2. Write a function that checks whether an element occurs in an array
+$elementOccurs = $this->elementExists([1, 2, 3], 5);
+
+//3. Write a function that concatenates two lists. ["a","b","c"], [1,2,3] → ["a","b","c",1,2,3] Any method is valid.
+$concatArray = $this->concatArrays(["a","b","c"], [1,2,3]);
+
+//4. Create a function that shuffles a deck of card and returns an array of cards ( n size )
+$shuffledDeck = $this->shuffleDeck(3);
+
+//5. Implement binary search
+$element = $this->binarySearch([1,2,3], 3);
+
+return [
+'oddNumbers'            => $oddNumbers,
+'elementOccurs'         => $elementOccurs? 'true' : 'false',
+'concatArray'           => $concatArray,
+'shuffledDeck'          => $shuffledDeck,
+'binarySearchElement'   => $element
+];
+}
+
+/**
+* Enumerate all odd numbers between 100 and 744
+* @return array
+*/
+private function oddNumbers($start, $stop) {
+$result = [];
+
+for($i=$start; $i<=$stop; $i++) {
+if($i % 2 !== 0) {
+$result[] = $i;
+}
+}
+
+return $result;
+}
+
+/**
+* Write a function that checks whether an element occurs in an array
+* @return bool
+*/
+private function elementExists($array, $element) {
+return in_array($element, $array);
+}
+
+/**
+* Write a function that concatenates two lists. ["a","b","c"], [1,2,3] → ["a","b","c",1,2,3] Any method is valid.
+* @return array
+*/
+private function concatArrays($array1, $array2) {
+return array_merge($array1, $array2);
+}
+
+/**
+* Create a function that shuffles a deck of card and returns an array of cards ( n size )
+* @return array
+*/
+private function shuffleDeck($num) {
+$deck = [
+'queen of spades',
+'10 of clubs',
+'9 of clubs',
+'ace of spades',
+'5 of spades'
+];
+
+$result = [];
+
+shuffle($deck);
+
+if($num > count($deck)) {
+$num = count($deck);
+}
+
+for($i=0; $i<$num; $i++) {
+$result []= $deck[$i];
+}
+
+return $result;
+}
+
+/**
+* Implement binary search
+* @return integer
+*/
+private function binarySearch($array, $element) {
+$start = 0;
+$end = count($array) - 1;
+
+while($start <= $end) {
+$middle = floor(($start + $end) / 2);
+
+if($element == $array[$middle]) {
+return $array[$middle];
+} elseif($element > $array[$middle]) {
+$start = $middle + 1;
+} else {
+$end = $middle -1;
+}
+}
+return -1;
+}
+
+}
